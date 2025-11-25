@@ -83,10 +83,12 @@
         /* FOOTER */
         .actions-bar { padding: 1rem; display: flex; justify-content: space-between; background-color: #f8fafc; border-top: 1px solid var(--border); }
         
-        button { border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+        button { border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; transition: all 0.2s; }
         .btn-add { background-color: var(--primary); color: white; }
         .btn-excel { background-color: white; border: 1px solid #1D6F42; color: #1D6F42; }
+        .btn-excel:hover { background-color: #1D6F42; color: white; }
         .btn-pdf { background-color: white; border: 1px solid #D32F2F; color: #D32F2F; }
+        .btn-pdf:hover { background-color: #D32F2F; color: white; }
 
     </style>
 </head>
@@ -196,24 +198,19 @@
 
     function formatMoney(amount) { return amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'; }
 
-    // --- LE SECRET DU PDF PARFAIT (Même méthode que ROI) ---
+    // --- PDF PROPRE ---
     function generateReportPDF() {
-        // 1. Récupération des données brutes
         const plannedTotal = document.getElementById('totalPlanned').innerText;
         const spentTotal = document.getElementById('totalSpent').innerText;
         const balanceTotal = document.getElementById('balance').innerText;
 
-        // 2. Construction des lignes du tableau
         let rowsHTML = "";
         document.querySelectorAll('#tableBody tr').forEach(row => {
             const cat = row.querySelector('select').value;
             const lib = row.querySelector('input[type="text"]').value || "-";
             const planned = (parseFloat(row.querySelector('.input-planned').value) || 0).toLocaleString('fr-FR', {minimumFractionDigits: 2});
             const spent = (parseFloat(row.querySelector('.input-spent').value) || 0).toLocaleString('fr-FR', {minimumFractionDigits: 2});
-            
-            // On récupère l'écart (le texte dans le badge)
             const gap = row.querySelector('.cell-ecart').innerText;
-            // Couleur conditionnelle pour le PDF (Rouge si négatif)
             const gapColor = gap.includes("-") ? "red" : "green";
 
             rowsHTML += `
@@ -227,7 +224,6 @@
             `;
         });
 
-        // 3. Construction du HTML "Virtuel" (Noir et Blanc, Net)
         const reportContent = `
             <div style="padding: 20px; font-family: Arial, sans-serif; color: #000;">
                 <h1 style="text-align:center; color:#4f46e5; margin-bottom: 10px;">Rapport de Suivi Budgétaire</h1>
@@ -266,7 +262,6 @@
             </div>
         `;
 
-        // 4. Génération
         const element = document.createElement('div');
         element.innerHTML = reportContent;
         
@@ -275,31 +270,48 @@
             filename:     'Budget_Campagne.pdf',
             image:        { type: 'jpeg', quality: 0.98 },
             html2canvas:  { scale: 2 },
-            jsPDF:        { unit: 'in', format: 'a4', orientation: 'landscape' } // Paysage pour que le tableau large rentre mieux
+            jsPDF:        { unit: 'in', format: 'a4', orientation: 'landscape' }
         };
 
         html2pdf().set(opt).from(element).save();
     }
 
-    // --- EXPORT EXCEL ---
+    // --- EXCEL AVEC FORMULES ---
     function downloadExcel() {
         let data = [];
-        data.push(["Catégorie", "Libellé", "Prévisionnel", "Réel Payé", "Écart"]); // Header
+        data.push(["Catégorie", "Libellé", "Prévisionnel", "Réel Payé", "Écart"]); // En-tête (Ligne 1)
 
-        document.querySelectorAll('#tableBody tr').forEach(row => {
+        const rows = document.querySelectorAll('#tableBody tr');
+        rows.forEach((row, index) => {
+            let excelRow = index + 2; // Les données commencent ligne 2
+
             let cat = row.querySelector('select').value;
             let lib = row.querySelector('input[type="text"]').value;
             let planned = parseFloat(row.querySelector('.input-planned').value) || 0;
             let spent = parseFloat(row.querySelector('.input-spent').value) || 0;
-            let diff = planned - spent;
-            data.push([cat, lib, planned, spent, diff]);
+            
+            // Ligne avec formule pour l'écart : E = C - D
+            data.push([
+                cat, 
+                lib, 
+                { t: 'n', v: planned }, 
+                { t: 'n', v: spent }, 
+                { t: 'n', f: `C${excelRow}-D${excelRow}` } // Formule Écart
+            ]);
         });
 
-        // Totaux
-        data.push(["", "TOTAL", 
-            parseFloat(document.getElementById('totalPlanned').innerText.replace(/[^\d.-]/g, '')),
-            parseFloat(document.getElementById('totalSpent').innerText.replace(/[^\d.-]/g, '')),
-            ""
+        // Ligne des TOTAUX
+        const lastRow = rows.length + 1; // Index de la dernière ligne de données
+        const totalPlannedFormula = `SUM(C2:C${lastRow})`;
+        const totalSpentFormula = `SUM(D2:D${lastRow})`;
+        const totalVarianceFormula = `SUM(E2:E${lastRow})`;
+
+        data.push([
+            "", 
+            "TOTAL GÉNÉRAL", 
+            { t: 'n', f: totalPlannedFormula },
+            { t: 'n', f: totalSpentFormula },
+            { t: 'n', f: totalVarianceFormula }
         ]);
 
         const wb = XLSX.utils.book_new();
