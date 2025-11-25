@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Outil de Suivi Budgétaire - BTS Com</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+
     <style>
         :root {
             --primary: #4f46e5;
@@ -14,6 +18,8 @@
             --success: #10b981;
             --warning: #f59e0b;
             --danger: #ef4444;
+            --excel: #1D6F42; /* Couleur Excel */
+            --pdf: #D32F2F;   /* Couleur PDF */
         }
 
         body {
@@ -43,6 +49,7 @@
             color: white;
             padding: 1.5rem;
             text-align: center;
+            position: relative;
         }
 
         h1 { margin: 0; font-size: 1.5rem; }
@@ -107,6 +114,7 @@
             border-radius: 6px;
             box-sizing: border-box;
             font-family: inherit;
+            background: transparent; /* Important pour le PDF */
         }
 
         input[type="number"] { text-align: right; }
@@ -114,6 +122,7 @@
         input:focus, select:focus {
             outline: 2px solid var(--primary);
             border-color: transparent;
+            background: white;
         }
 
         /* Colonnes spécifiques */
@@ -142,19 +151,38 @@
             border-top: 1px solid var(--border);
         }
 
-        .btn-add {
-            background-color: var(--primary);
-            color: white;
+        .left-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .right-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
             border: none;
-            padding: 10px 20px;
+            padding: 10px 15px;
             border-radius: 6px;
             cursor: pointer;
             font-weight: 600;
             display: flex;
             align-items: center;
             gap: 8px;
+            transition: all 0.2s;
+            font-size: 0.9rem;
         }
+
+        .btn-add { background-color: var(--primary); color: white; }
         .btn-add:hover { background-color: #4338ca; }
+
+        .btn-excel { background-color: white; border: 1px solid var(--excel); color: var(--excel); }
+        .btn-excel:hover { background-color: var(--excel); color: white; }
+
+        .btn-pdf { background-color: white; border: 1px solid var(--pdf); color: var(--pdf); }
+        .btn-pdf:hover { background-color: var(--pdf); color: white; }
+
 
         /* Indicateurs visuels */
         .badge {
@@ -183,14 +211,19 @@
             transition: width 0.3s, background-color 0.3s;
         }
 
+        /* Masquer les boutons lors de l'impression PDF */
+        .hide-on-print {
+            /* Sera utilisé par JS lors de la génération */
+        }
+
     </style>
 </head>
 <body>
 
-<div class="app-container">
+<div class="app-container" id="contentToPrint">
     <div class="header">
-        <h1>📊 Gestionnaire de Budget de Campagne</h1>
-        <div class="subtitle">Planifiez, dépensez, et surveillez les écarts en temps réel.</div>
+        <h1>📊 Gestionnaire de Budget</h1>
+        <div class="subtitle">Suivi de campagne - BTS Com</div>
     </div>
 
     <div class="dashboard">
@@ -207,7 +240,7 @@
             <div style="font-size:0.8rem; margin-top:3px;" id="percentText">0% consommé</div>
         </div>
         <div class="kpi-card">
-            <div class="kpi-label">Reste à dépenser (Solde)</div>
+            <div class="kpi-label">Reste à dépenser</div>
             <div class="kpi-value val-balance" id="balance">0.00 €</div>
         </div>
     </div>
@@ -217,63 +250,61 @@
             <thead>
                 <tr>
                     <th class="col-cat">Catégorie</th>
-                    <th class="col-lib">Libellé de la dépense</th>
-                    <th class="col-montant">Prévisionnel (€)</th>
-                    <th class="col-montant">Réel Payé (€)</th>
+                    <th class="col-lib">Libellé</th>
+                    <th class="col-montant">Prévisionnel</th>
+                    <th class="col-montant">Réel Payé</th>
                     <th class="col-ecart">Écart</th>
-                    <th class="col-action"></th>
+                    <th class="col-action hide-on-print"></th>
                 </tr>
             </thead>
             <tbody id="tableBody">
-                </tbody>
+            </tbody>
         </table>
     </div>
 
-    <div class="actions-bar">
-        <button class="btn-add" onclick="addRow()">
-            <span>+</span> Ajouter une ligne
-        </button>
-        <div style="font-size:0.9rem; color:#64748b; font-style:italic;">
-            Remplissez le "Prévisionnel" au début du projet, et le "Réel" quand vous recevez les factures.
+    <div class="actions-bar hide-on-print" data-html2canvas-ignore="true">
+        <div class="left-actions">
+            <button class="btn-add" onclick="addRow()">
+                <span>+</span> Ajouter ligne
+            </button>
+        </div>
+        <div class="right-actions">
+            <button class="btn-excel" onclick="exportToExcel()">
+                <span>📗</span> Excel (.xlsx)
+            </button>
+            <button class="btn-pdf" onclick="exportToPDF()">
+                <span>📕</span> PDF
+            </button>
         </div>
     </div>
 </div>
 
 <script>
-    // Initialisation
+    // --- LOGIQUE METIER (Budget) ---
     document.addEventListener('DOMContentLoaded', () => {
-        addRow(); // Ajouter une première ligne vide au démarrage
+        addRow(); 
         updateTotals();
     });
 
     function addRow() {
         const tbody = document.getElementById('tableBody');
         const row = document.createElement('tr');
-
         row.innerHTML = `
             <td>
                 <select onchange="updateTotals()">
-                    <option value="media">Média (Achat espace)</option>
-                    <option value="prod">Production (Créa/Vidéo)</option>
-                    <option value="fees">Honoraires / Agence</option>
-                    <option value="event">Événementiel</option>
-                    <option value="print">Impression / Print</option>
-                    <option value="other">Autre</option>
+                    <option value="Média">Média</option>
+                    <option value="Production">Production</option>
+                    <option value="Honoraires">Honoraires</option>
+                    <option value="Event">Événementiel</option>
+                    <option value="Print">Print</option>
+                    <option value="Autre">Autre</option>
                 </select>
             </td>
-            <td>
-                <input type="text" placeholder="Ex: Campagne Facebook Janvier..." >
-            </td>
-            <td>
-                <input type="number" class="input-planned" placeholder="0.00" oninput="updateTotals()">
-            </td>
-            <td>
-                <input type="number" class="input-spent" placeholder="0.00" oninput="updateTotals()">
-            </td>
-            <td class="cell-ecart">
-                <span class="badge bg-ok">0.00 €</span>
-            </td>
-            <td style="text-align:center;">
+            <td><input type="text" placeholder="Description..." ></td>
+            <td><input type="number" class="input-planned" placeholder="0.00" oninput="updateTotals()"></td>
+            <td><input type="number" class="input-spent" placeholder="0.00" oninput="updateTotals()"></td>
+            <td class="cell-ecart"><span class="badge bg-ok">0.00 €</span></td>
+            <td class="col-action hide-on-print" style="text-align:center;">
                 <button class="btn-delete" onclick="deleteRow(this)">×</button>
             </td>
         `;
@@ -282,13 +313,11 @@
 
     function deleteRow(btn) {
         const row = btn.parentNode.parentNode;
-        // On empêche de supprimer la dernière ligne s'il n'y en a qu'une
         const rowCount = document.getElementById('tableBody').rows.length;
         if (rowCount > 1) {
             row.remove();
             updateTotals();
         } else {
-            // Si c'est la seule ligne, on vide juste les champs
             row.querySelectorAll('input').forEach(input => input.value = '');
             updateTotals();
         }
@@ -297,83 +326,104 @@
     function updateTotals() {
         let totalPlanned = 0;
         let totalSpent = 0;
-
         const rows = document.querySelectorAll('#tableBody tr');
 
         rows.forEach(row => {
-            // Récupération des valeurs inputs
-            const plannedInput = row.querySelector('.input-planned');
-            const spentInput = row.querySelector('.input-spent');
-            const ecartCell = row.querySelector('.cell-ecart');
-
-            const planned = parseFloat(plannedInput.value) || 0;
-            const spent = parseFloat(spentInput.value) || 0;
-
-            // Calculs ligne par ligne
+            const planned = parseFloat(row.querySelector('.input-planned').value) || 0;
+            const spent = parseFloat(row.querySelector('.input-spent').value) || 0;
             const ecart = planned - spent;
+            const ecartCell = row.querySelector('.cell-ecart');
             
-            // Mise à jour de la cellule écart avec style
             let badgeClass = 'bg-ok';
             let sign = '+';
-            
-            if (ecart < 0) {
-                badgeClass = 'bg-danger'; // On a dépassé le budget
-                sign = '';
-            } else if (spent > 0 && ecart < (planned * 0.1)) {
-                badgeClass = 'bg-warn'; // Attention, il reste moins de 10%
-            }
+            if (ecart < 0) { badgeClass = 'bg-danger'; sign = ''; }
+            else if (spent > 0 && ecart < (planned * 0.1)) { badgeClass = 'bg-warn'; }
 
-            // Affichage Ecart ligne
             ecartCell.innerHTML = `<span class="badge ${badgeClass}">${sign}${ecart.toFixed(2)} €</span>`;
-
-            // Cumul pour les totaux
             totalPlanned += planned;
             totalSpent += spent;
         });
 
-        // --- Mise à jour Dashboard Global ---
-        
-        // 1. Valeurs
         const balance = totalPlanned - totalSpent;
-        
         document.getElementById('totalPlanned').innerText = formatMoney(totalPlanned);
         document.getElementById('totalSpent').innerText = formatMoney(totalSpent);
         const balElement = document.getElementById('balance');
         balElement.innerText = (balance > 0 ? '+' : '') + formatMoney(balance);
+        balElement.style.color = balance < 0 ? "#ef4444" : "#10b981";
 
-        // Couleur du solde global
-        if (balance < 0) {
-            balElement.style.color = "#ef4444"; // Rouge
-        } else {
-            balElement.style.color = "#10b981"; // Vert
-        }
-
-        // 2. Barre de progression
-        let percent = 0;
-        if (totalPlanned > 0) {
-            percent = (totalSpent / totalPlanned) * 100;
-        }
-        
+        let percent = totalPlanned > 0 ? (totalSpent / totalPlanned) * 100 : 0;
         const progressBar = document.getElementById('globalProgress');
-        const percentText = document.getElementById('percentText');
-
-        // Limiter la barre à 100% visuellement même si on dépasse
         const visualPercent = Math.min(percent, 100);
         progressBar.style.width = visualPercent + '%';
-        percentText.innerText = percent.toFixed(1) + '% consommé';
-
-        // Couleur de la barre
-        if (percent > 100) {
-            progressBar.style.backgroundColor = "#ef4444"; // Rouge (Dépassement)
-        } else if (percent > 80) {
-            progressBar.style.backgroundColor = "#f59e0b"; // Orange (Attention)
-        } else {
-            progressBar.style.backgroundColor = "#10b981"; // Vert (OK)
-        }
+        document.getElementById('percentText').innerText = percent.toFixed(1) + '% consommé';
+        
+        if (percent > 100) progressBar.style.backgroundColor = "#ef4444";
+        else if (percent > 80) progressBar.style.backgroundColor = "#f59e0b";
+        else progressBar.style.backgroundColor = "#10b981";
     }
 
     function formatMoney(amount) {
         return amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+    }
+
+    // --- LOGIQUE EXPORT ---
+
+    // 1. Export Excel
+    function exportToExcel() {
+        // Préparation des données
+        let data = [];
+        // Header
+        data.push(["Catégorie", "Libellé", "Prévisionnel (€)", "Réel Payé (€)", "Écart (€)"]);
+
+        // Lignes
+        const rows = document.querySelectorAll('#tableBody tr');
+        rows.forEach(row => {
+            let cat = row.querySelector('select').value;
+            let lib = row.querySelector('input[type="text"]').value;
+            let planned = parseFloat(row.querySelector('.input-planned').value) || 0;
+            let spent = parseFloat(row.querySelector('.input-spent').value) || 0;
+            let diff = planned - spent;
+
+            data.push([cat, lib, planned, spent, diff]);
+        });
+
+        // Totaux (Ligne de fin)
+        data.push(["", "TOTAL", 
+            parseFloat(document.getElementById('totalPlanned').innerText.replace(/\s|€/g, '').replace(',', '.')),
+            parseFloat(document.getElementById('totalSpent').innerText.replace(/\s|€/g, '').replace(',', '.')),
+            ""
+        ]);
+
+        // Création du fichier
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Budget Campagne");
+        XLSX.writeFile(wb, "Mon_Budget_Campagne.xlsx");
+    }
+
+    // 2. Export PDF
+    function exportToPDF() {
+        const element = document.getElementById('contentToPrint');
+        
+        // Astuce : html2pdf ne capture pas toujours bien les valeurs des inputs
+        // On force les valeurs dans l'attribut HTML "value" pour qu'elles apparaissent
+        document.querySelectorAll('input').forEach(input => {
+            input.setAttribute('value', input.value);
+        });
+        document.querySelectorAll('select').forEach(select => {
+            const selectedOption = select.options[select.selectedIndex];
+            selectedOption.setAttribute('selected', 'selected');
+        });
+
+        const opt = {
+            margin:       0.3,
+            filename:     'Mon_Budget_Campagne.pdf',
+            image:        { type: 'jpeg', quality: 0.98 },
+            html2canvas:  { scale: 2 }, // Meilleure résolution
+            jsPDF:        { unit: 'in', format: 'a4', orientation: 'landscape' } // Format Paysage pour le tableau
+        };
+
+        html2pdf().set(opt).from(element).save();
     }
 </script>
 
